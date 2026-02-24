@@ -1,10 +1,12 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -59,11 +61,27 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
   
   void _initSpeech() async {
-    _speechEnabled = await _speech.initialize(
-      onError: (error) => print('Speech error: $error'),
-      onStatus: (status) => print('Speech status: $status'),
-    );
+    // Request microphone permission first
+    final status = await Permission.microphone.request();
+    if (status.isDenied || status.isPermanentlyDenied) {
+      print('Microphone permission denied: $status');
+      _showMessage('需要麦克风权限才能使用语音识别，请在系统设置中开启');
+      _speechEnabled = false;
+      setState(() {});
+      return;
+    }
+    
+    try {
+      _speechEnabled = await _speech.initialize(
+        onError: (error) => print('Speech error: $error'),
+        onStatus: (status) => print('Speech status: $status'),
+      );
+    } catch (e) {
+      print('Speech init error: $e');
+      _speechEnabled = false;
+    }
     setState(() {});
+    print('Speech enabled: $_speechEnabled');
   }
   
   void _initTts() async {
@@ -111,7 +129,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       return;
     }
     if (!_speechEnabled) {
-      _showMessage('语音识别不可用，请检查权限设置');
+      _showMessage('语音识别不可用，请确保已授予麦克风权限，并检查系统设置中是否启用了语音识别');
       return;
     }
     
