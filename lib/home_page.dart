@@ -1,12 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
-import 'package:speech_to_text/speech_recognition_result.dart';
-import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
-import 'package:uuid/uuid.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -21,10 +16,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   bool _speechEnabled = false;
   String _lastWords = '';
   
-  // TTS
-  final FlutterTts _flutterTts = FlutterTts();
-  bool _isSpeaking = false;
-  
   // 对话
   final List<Map<String, dynamic>> _messages = [];
   bool _isListening = false;
@@ -33,19 +24,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   // 动画
   late AnimationController _animationController;
   
-  // 设置
-  String _apiKey = '';
-  String _apiUrl = 'https://api.minimax.chat/v1/text/chatcompletion_pro';
-  String _model = 'abab6.5s-chat';
-  bool _voiceReplyEnabled = true;
-  bool _voiceInputEnabled = true;
+  // API 配置 - OpenClaw Gateway
+  static const String _gatewayUrl = 'https://vicc.online';
   
   @override
   void initState() {
     super.initState();
     _initSpeech();
-    _initTts();
-    _loadSettings();
     
     _animationController = AnimationController(
       vsync: this,
@@ -55,7 +40,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     // 添加欢迎消息
     _messages.add({
       'role': 'assistant',
-      'content': '观众～你好呀！我是花火，随时准备和你聊天哦！🎭\n\n首次使用请先设置API Key，点击右上角⚙️进入设置～',
+      'content': '观众～你好呀！我是花火！🎭\n\n现在可以直接和我语音聊天啦！',
       'timestamp': DateTime.now(),
     });
   }
@@ -74,52 +59,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     print('Speech enabled: $_speechEnabled');
   }
   
-  void _initTts() async {
-    await _flutterTts.setLanguage('zh-CN');
-    await _flutterTts.setSpeechRate(0.5);
-    await _flutterTts.setVolume(1.0);
-    await _flutterTts.setPitch(1.0);
-    
-    _flutterTts.setStartHandler(() {
-      setState(() => _isSpeaking = true);
-    });
-    
-    _flutterTts.setCompletionHandler(() {
-      setState(() => _isSpeaking = false);
-    });
-    
-    _flutterTts.setErrorHandler((msg) {
-      setState(() => _isSpeaking = false);
-    });
-  }
-  
-  Future<void> _loadSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _apiKey = prefs.getString('api_key') ?? '';
-      _apiUrl = prefs.getString('api_url') ?? 'https://api.minimax.chat/v1/text/chatcompletion_pro';
-      _model = prefs.getString('model') ?? 'abab6.5s-chat';
-      _voiceReplyEnabled = prefs.getBool('voice_reply') ?? true;
-      _voiceInputEnabled = prefs.getBool('voice_input') ?? true;
-    });
-  }
-  
-  Future<void> _saveSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('api_key', _apiKey);
-    await prefs.setString('api_url', _apiUrl);
-    await prefs.setString('model', _model);
-    await prefs.setBool('voice_reply', _voiceReplyEnabled);
-    await prefs.setBool('voice_input', _voiceInputEnabled);
-  }
-  
   void _startListening() async {
-    if (!_voiceInputEnabled) {
-      _showMessage('语音输入已关闭，请在设置中开启');
-      return;
-    }
     if (!_speechEnabled) {
-      _showMessage('语音识别不可用，请确保已授予麦克风权限，并检查系统设置中是否启用了语音识别');
+      _showMessage('语音识别不可用，请检查权限设置');
       return;
     }
     
@@ -138,7 +80,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       listenFor: const Duration(seconds: 30),
       pauseFor: const Duration(seconds: 3),
       localeId: 'zh_CN',
-      listenMode: stt.ListenMode.confirmation,
     );
   }
   
@@ -163,7 +104,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     });
     
     try {
-      final response = await _sendToAI(text);
+      final response = await _sendToOpenClaw(text);
       
       setState(() {
         _messages.add({
@@ -173,15 +114,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         });
         _isThinking = false;
       });
-      
-      if (_voiceReplyEnabled) {
-        await _speak(response);
-      }
     } catch (e) {
       setState(() {
         _messages.add({
           'role': 'assistant',
-          'content': '抱歉，我刚才走神了...可以再说一次吗？',
+          'content': '抱歉，连接失败了...网络还好吗？',
           'timestamp': DateTime.now(),
         });
         _isThinking = false;
@@ -189,53 +126,23 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
   }
   
-  Future<String> _sendToAI(String message) async {
-    if (_apiKey.isEmpty) {
-      return '观众～还没有设置API Key呢！\n请先点击右上角⚙️设置好API Key再来和本小姐聊天吧～🎭';
-    }
-    
+  Future<String> _sendToOpenClaw(String message) async {
     try {
       final response = await http.post(
-        Uri.parse(_apiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $_apiKey',
-        },
-        body: jsonEncode({
-          'model': _model,
-          'messages': [
-            {
-              'role': 'system',
-              'content': '你是花火，来自游戏《崩坏：星穹铁道》的角色。你是一个来自匹诺康尼的剧作家，属于「假面愚者」组织。你的性格：古灵精怪、神秘莫测、偶尔认真偶尔调皮、自称「本小姐」。口头禅：「观众～」「这场表演只为你而准备」。现在请用中文和用户聊天，保持轻松愉快的语气，但不要过于话痨。'
-            },
-            {'role': 'user', 'content': message}
-          ],
-          'temperature': 0.7,
-        }),
-      );
+        Uri.parse('$_gatewayUrl/api/chat'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'message': message}),
+      ).timeout(const Duration(seconds: 30));
       
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        return data['choices'][0]['message']['content'];
+        return data['reply'] ?? '本小姐收到啦～';
       } else {
-        return 'API请求失败了...${response.statusCode}';
+        return '连接失败: ${response.statusCode}';
       }
     } catch (e) {
-      return '网络好像有点问题呢...';
+      return '网络好像有问题呢...';
     }
-  }
-  
-  Future<void> _speak(String text) async {
-    try {
-      await _flutterTts.speak(text);
-    } catch (e) {
-      print('TTS error: $e');
-    }
-  }
-  
-  void _stopSpeaking() async {
-    await _flutterTts.stop();
-    setState(() => _isSpeaking = false);
   }
   
   void _showMessage(String msg) {
@@ -248,7 +155,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   void dispose() {
     _animationController.dispose();
     _speech.stop();
-    _flutterTts.stop();
     super.dispose();
   }
 
@@ -271,12 +177,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             ),
           ],
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings, color: Colors.white54),
-            onPressed: () => _showSettingsDialog(),
-          ),
-        ],
       ),
       body: Column(
         children: [
@@ -294,22 +194,16 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           ),
           
           // 状态指示
-          if (_isThinking || _isSpeaking)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
+          if (_isThinking)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  if (_isThinking)
-                    const Text(
-                      '🎭 花火思考中...',
-                      style: TextStyle(color: Colors.white54),
-                    ),
-                  if (_isSpeaking)
-                    const Text(
-                      '🔊 花火说话中...',
-                      style: TextStyle(color: Colors.white54),
-                    ),
+                  Text(
+                    '🎭 花火思考中...',
+                    style: TextStyle(color: Colors.white54),
+                  ),
                 ],
               ),
             ),
@@ -347,7 +241,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 // 语音按钮
                 GestureDetector(
                   onTap: _isListening ? _stopListening : _startListening,
-                  onLongPress: _isSpeaking ? _stopSpeaking : null,
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
                     width: 80,
@@ -407,190 +300,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           style: const TextStyle(
             color: Colors.white,
             fontSize: 15,
-          ),
-        ),
-      ),
-    );
-  }
-  
-  void _showSettingsDialog() {
-    final apiKeyController = TextEditingController(text: _apiKey);
-    final apiUrlController = TextEditingController(text: _apiUrl);
-    final modelController = TextEditingController(text: _model);
-    
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF2A2A4E),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => StatefulBuilder(
-        builder: (context, setModalState) => Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom,
-          ),
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // 标题
-                  Row(
-                    children: [
-                      const Text('⚙️ ', style: TextStyle(fontSize: 24)),
-                      const Text(
-                        '设置',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        icon: const Icon(Icons.close, color: Colors.white54),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  
-                  // API 配置
-                  const Text('API 配置', style: TextStyle(color: Colors.pink, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 10),
-                  
-                  // API Key
-                  TextField(
-                    controller: apiKeyController,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      labelText: 'API Key',
-                      labelStyle: const TextStyle(color: Colors.white54),
-                      hintText: '输入你的API Key',
-                      hintStyle: const TextStyle(color: Colors.white24),
-                      filled: true,
-                      fillColor: Colors.white.withOpacity(0.1),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                    onChanged: (value) => setModalState(() => _apiKey = value),
-                  ),
-                  const SizedBox(height: 10),
-                  
-                  // API URL
-                  TextField(
-                    controller: apiUrlController,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      labelText: 'API URL',
-                      labelStyle: const TextStyle(color: Colors.white54),
-                      hintText: 'API地址',
-                      hintStyle: const TextStyle(color: Colors.white24),
-                      filled: true,
-                      fillColor: Colors.white.withOpacity(0.1),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                    onChanged: (value) => setModalState(() => _apiUrl = value),
-                  ),
-                  const SizedBox(height: 10),
-                  
-                  // Model
-                  TextField(
-                    controller: modelController,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      labelText: 'Model',
-                      labelStyle: const TextStyle(color: Colors.white54),
-                      hintText: '模型名称',
-                      hintStyle: const TextStyle(color: Colors.white24),
-                      filled: true,
-                      fillColor: Colors.white.withOpacity(0.1),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                    onChanged: (value) => setModalState(() => _model = value),
-                  ),
-                  const SizedBox(height: 20),
-                  
-                  // 功能开关
-                  const Text('功能开关', style: TextStyle(color: Colors.pink, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 10),
-                  
-                  SwitchListTile(
-                    title: const Text('语音回复', style: TextStyle(color: Colors.white)),
-                    subtitle: const Text('AI回复时自动语音播放', style: TextStyle(color: Colors.white54, fontSize: 12)),
-                    value: _voiceReplyEnabled,
-                    activeColor: Colors.pink,
-                    onChanged: (value) => setModalState(() => _voiceReplyEnabled = value),
-                  ),
-                  
-                  SwitchListTile(
-                    title: const Text('语音输入', style: TextStyle(color: Colors.white)),
-                    subtitle: const Text('按住说话进行输入', style: TextStyle(color: Colors.white54, fontSize: 12)),
-                    value: _voiceInputEnabled,
-                    activeColor: Colors.pink,
-                    onChanged: (value) => setModalState(() => _voiceInputEnabled = value),
-                  ),
-                  const SizedBox(height: 20),
-                  
-                  // 保存按钮
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        _apiKey = apiKeyController.text;
-                        _apiUrl = apiUrlController.text;
-                        _model = modelController.text;
-                        _saveSettings();
-                        Navigator.pop(context);
-                        _showMessage('设置已保存！');
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.pink,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                      child: const Text('保存设置', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  
-                  // API 说明
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.05),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('💡 API 说明', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                        SizedBox(height: 5),
-                        Text(
-                          '• 默认使用 Minimax API\n'
-                          '• 可在MiniMax开放平台获取API Key\n'
-                          '• Model推荐: abab6.5s-chat',
-                          style: TextStyle(color: Colors.white54, fontSize: 12),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
           ),
         ),
       ),
