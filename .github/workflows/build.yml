@@ -16,21 +16,39 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.0'
+          flutter-version: '3.22.0'
           channel: 'stable'
           
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v2
+      - name: Show Flutter version
+        run: flutter --version
         
       - name: Get dependencies
         run: flutter pub get
         
+      - name: List files
+        run: ls -la
+        
+      - name: Check Android setup
+        run: |
+          flutter doctor -v
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+        
       - name: Create local.properties
-        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          cat local.properties
         
       - name: Build APK (Debug)
-        run: flutter build apk --debug 2>&1
-        continue-on-error: true
+        run: |
+          flutter build apk --debug 2>&1 | tee build.log
+        
+      - name: Show build output
+        if: always()
+        run: cat build.log
+        
+      - name: Check APK output
+        run: ls -la build/app/outputs/flutter-apk/ || echo "No APK found"
         
       - name: Upload Debug APK as Artifact
         uses: actions/upload-artifact@v4
@@ -40,8 +58,9 @@ jobs:
           path: build/app/outputs/flutter-apk/app-debug.apk
         
       - name: Build APK (Release)
-        run: flutter build apk --release 2>&1
-        continue-on-error: true
+        if: success()
+        run: |
+          flutter build apk --release 2>&1 | tee release-build.log
         
       - name: Upload Release APK as Artifact
         uses: actions/upload-artifact@v4
