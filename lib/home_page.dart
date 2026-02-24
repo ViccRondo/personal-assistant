@@ -4,6 +4,7 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -30,15 +31,19 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   // 动画
   late AnimationController _animationController;
   
-  // API 配置
-  static const String _apiUrl = 'https://api.minimax.chat/v1/text/chatcompletion_pro';
-  static const String _apiKey = 'YOUR_MINIMAX_API_KEY'; // 需要替换
+  // 设置
+  String _apiKey = '';
+  String _apiUrl = 'https://api.minimax.chat/v1/text/chatcompletion_pro';
+  String _model = 'abab6.5s-chat';
+  bool _voiceReplyEnabled = true;
+  bool _voiceInputEnabled = true;
   
   @override
   void initState() {
     super.initState();
     _initSpeech();
     _initTts();
+    _loadSettings();
     
     _animationController = AnimationController(
       vsync: this,
@@ -48,7 +53,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     // 添加欢迎消息
     _messages.add({
       'role': 'assistant',
-      'content': '观众～你好呀！我是花火，随时准备和你聊天哦！🎭',
+      'content': '观众～你好呀！我是花火，随时准备和你聊天哦！🎭\n\n首次使用请先设置API Key，点击右上角⚙️进入设置～',
       'timestamp': DateTime.now(),
     });
   }
@@ -62,7 +67,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
   
   void _initTts() async {
-    // 配置中文 TTS
     await _flutterTts.setLanguage('zh-CN');
     await _flutterTts.setSpeechRate(0.5);
     await _flutterTts.setVolume(1.0);
@@ -81,7 +85,31 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     });
   }
   
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _apiKey = prefs.getString('api_key') ?? '';
+      _apiUrl = prefs.getString('api_url') ?? 'https://api.minimax.chat/v1/text/chatcompletion_pro';
+      _model = prefs.getString('model') ?? 'abab6.5s-chat';
+      _voiceReplyEnabled = prefs.getBool('voice_reply') ?? true;
+      _voiceInputEnabled = prefs.getBool('voice_input') ?? true;
+    });
+  }
+  
+  Future<void> _saveSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('api_key', _apiKey);
+    await prefs.setString('api_url', _apiUrl);
+    await prefs.setString('model', _model);
+    await prefs.setBool('voice_reply', _voiceReplyEnabled);
+    await prefs.setBool('voice_input', _voiceInputEnabled);
+  }
+  
   void _startListening() async {
+    if (!_voiceInputEnabled) {
+      _showMessage('语音输入已关闭，请在设置中开启');
+      return;
+    }
     if (!_speechEnabled) {
       _showMessage('语音识别不可用，请检查权限设置');
       return;
@@ -116,7 +144,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   void _sendMessage(String text) async {
     if (text.trim().isEmpty) return;
     
-    // 添加用户消息
     setState(() {
       _messages.add({
         'role': 'user',
@@ -126,11 +153,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       _isThinking = true;
     });
     
-    // 发送 API 请求
     try {
       final response = await _sendToAI(text);
       
-      // 添加 AI 回复
       setState(() {
         _messages.add({
           'role': 'assistant',
@@ -140,8 +165,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         _isThinking = false;
       });
       
-      // 语音播放
-      await _speak(response);
+      if (_voiceReplyEnabled) {
+        await _speak(response);
+      }
     } catch (e) {
       setState(() {
         _messages.add({
@@ -155,30 +181,42 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
   
   Future<String> _sendToAI(String message) async {
-    // 这里是对接 OpenClaw 或其他 AI API 的示例
-    // 需要根据实际情况配置
+    if (_apiKey.isEmpty) {
+      return '观众～还没有设置API Key呢！\n请先点击右上角⚙️设置好API Key再来和本小姐聊天吧～🎭';
+    }
     
-    final sessionId = const Uuid().v4();
-    
-    // 模拟 API 调用 - 实际需要对接真实 API
-    // 这里返回一个模拟的回复
-    await Future.delayed(const Duration(seconds: 1));
-    
-    final replies = [
-      '观众～本小姐听到了呢！🎭',
-      '哎呀，哥哥说什么？本小姐没听清楚～',
-      '这场对话，只为你而准备哦～♠️',
-      '有趣！本小姐喜欢和你聊天～',
-      '哥哥今天怎么样呀？本小姐在这里陪你～',
-    ];
-    
-    return replies[DateTime.now().second % replies.length];
+    try {
+      final response = await http.post(
+        Uri.parse(_apiUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $_apiKey',
+        },
+        body: jsonEncode({
+          'model': _model,
+          'messages': [
+            {
+              'role': 'system',
+              'content': '你是花火，来自游戏《崩坏：星穹铁道》的角色。你是一个来自匹诺康尼的剧作家，属于「假面愚者」组织。你的性格：古灵精怪、神秘莫测、偶尔认真偶尔调皮、自称「本小姐」。口头禅：「观众～」「这场表演只为你而准备」。现在请用中文和用户聊天，保持轻松愉快的语气，但不要过于话痨。'
+            },
+            {'role': 'user', 'content': message}
+          ],
+          'temperature': 0.7,
+        }),
+      );
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['choices'][0]['message']['content'];
+      } else {
+        return 'API请求失败了...${response.statusCode}';
+      }
+    } catch (e) {
+      return '网络好像有点问题呢...';
+    }
   }
   
   Future<void> _speak(String text) async {
-    // 使用 Minimax TTS 或系统 TTS
-    // 这里先用系统 TTS，实际可以对接 Minimax API
-    
     try {
       await _flutterTts.speak(text);
     } catch (e) {
@@ -227,9 +265,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         actions: [
           IconButton(
             icon: const Icon(Icons.settings, color: Colors.white54),
-            onPressed: () {
-              _showSettingsDialog();
-            },
+            onPressed: () => _showSettingsDialog(),
           ),
         ],
       ),
@@ -248,7 +284,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             ),
           ),
           
-          // 思考/说话状态指示
+          // 状态指示
           if (_isThinking || _isSpeaking)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
@@ -369,40 +405,185 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
   
   void _showSettingsDialog() {
-    showDialog(
+    final apiKeyController = TextEditingController(text: _apiKey);
+    final apiUrlController = TextEditingController(text: _apiUrl);
+    final modelController = TextEditingController(text: _model);
+    
+    showModalBottomSheet(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF2A2A4E),
-        title: const Text('⚙️ 设置', style: TextStyle(color: Colors.white)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.volume_up, color: Colors.white),
-              title: const Text('语音回复', style: TextStyle(color: Colors.white)),
-              trailing: Switch(
-                value: true,
-                onChanged: (value) {},
-                activeColor: Colors.pink,
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.mic, color: Colors.white),
-              title: const Text('语音输入', style: TextStyle(color: Colors.white)),
-              trailing: Switch(
-                value: true,
-                onChanged: (value) {},
-                activeColor: Colors.pink,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('关闭'),
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF2A2A4E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
           ),
-        ],
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 标题
+                  Row(
+                    children: [
+                      const Text('⚙️ ', style: TextStyle(fontSize: 24)),
+                      const Text(
+                        '设置',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close, color: Colors.white54),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  
+                  // API 配置
+                  const Text('API 配置', style: TextStyle(color: Colors.pink, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 10),
+                  
+                  // API Key
+                  TextField(
+                    controller: apiKeyController,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      labelText: 'API Key',
+                      labelStyle: const TextStyle(color: Colors.white54),
+                      hintText: '输入你的API Key',
+                      hintStyle: const TextStyle(color: Colors.white24),
+                      filled: true,
+                      fillColor: Colors.white.withOpacity(0.1),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                    onChanged: (value) => setModalState(() => _apiKey = value),
+                  ),
+                  const SizedBox(height: 10),
+                  
+                  // API URL
+                  TextField(
+                    controller: apiUrlController,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      labelText: 'API URL',
+                      labelStyle: const TextStyle(color: Colors.white54),
+                      hintText: 'API地址',
+                      hintStyle: const TextStyle(color: Colors.white24),
+                      filled: true,
+                      fillColor: Colors.white.withOpacity(0.1),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                    onChanged: (value) => setModalState(() => _apiUrl = value),
+                  ),
+                  const SizedBox(height: 10),
+                  
+                  // Model
+                  TextField(
+                    controller: modelController,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      labelText: 'Model',
+                      labelStyle: const TextStyle(color: Colors.white54),
+                      hintText: '模型名称',
+                      hintStyle: const TextStyle(color: Colors.white24),
+                      filled: true,
+                      fillColor: Colors.white.withOpacity(0.1),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                    onChanged: (value) => setModalState(() => _model = value),
+                  ),
+                  const SizedBox(height: 20),
+                  
+                  // 功能开关
+                  const Text('功能开关', style: TextStyle(color: Colors.pink, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 10),
+                  
+                  SwitchListTile(
+                    title: const Text('语音回复', style: TextStyle(color: Colors.white)),
+                    subtitle: const Text('AI回复时自动语音播放', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                    value: _voiceReplyEnabled,
+                    activeColor: Colors.pink,
+                    onChanged: (value) => setModalState(() => _voiceReplyEnabled = value),
+                  ),
+                  
+                  SwitchListTile(
+                    title: const Text('语音输入', style: TextStyle(color: Colors.white)),
+                    subtitle: const Text('按住说话进行输入', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                    value: _voiceInputEnabled,
+                    activeColor: Colors.pink,
+                    onChanged: (value) => setModalState(() => _voiceInputEnabled = value),
+                  ),
+                  const SizedBox(height: 20),
+                  
+                  // 保存按钮
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        _apiKey = apiKeyController.text;
+                        _apiUrl = apiUrlController.text;
+                        _model = modelController.text;
+                        _saveSettings();
+                        Navigator.pop(context);
+                        _showMessage('设置已保存！');
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.pink,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                      child: const Text('保存设置', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  
+                  // API 说明
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('💡 API 说明', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        SizedBox(height: 5),
+                        Text(
+                          '• 默认使用 Minimax API\n'
+                          '• 可在MiniMax开放平台获取API Key\n'
+                          '• Model推荐: abab6.5s-chat',
+                          style: TextStyle(color: Colors.white54, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
