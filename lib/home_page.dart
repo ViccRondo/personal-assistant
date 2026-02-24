@@ -24,8 +24,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   // 动画
   late AnimationController _animationController;
   
-  // API 配置 - OpenClaw Gateway
-  static const String _gatewayUrl = 'https://vicc.online';
+  // API 配置 - OpenClaw Gateway (本小姐的Gateway)
+  static const String _gatewayUrl = 'https://api.openchat.chat';
   
   @override
   void initState() {
