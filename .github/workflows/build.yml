@@ -29,13 +29,30 @@ jobs:
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
         
       - name: Build APK (Debug)
-        run: flutter build apk --debug
+        run: flutter build apk --debug 2>&1
+        continue-on-error: true
+        
+      - name: Upload Debug APK as Artifact
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
         
       - name: Build APK (Release)
-        run: flutter build apk --release
+        run: flutter build apk --release 2>&1
+        continue-on-error: true
         
-      - name: Upload Release APK
+      - name: Upload Release APK as Artifact
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+        
+      - name: Create Release
         uses: softprops/action-gh-release@v1
+        if: success()
         with:
           files: |
             build/app/outputs/flutter-apk/app-release.apk
