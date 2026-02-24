@@ -61,33 +61,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
   
   void _initSpeech() async {
-    // Request microphone permission first
-    final status = await Permission.microphone.request();
-    if (status.isDenied || status.isPermanentlyDenied) {
-      print('Microphone permission denied: $status');
-      _showMessage('需要麦克风权限才能使用语音识别，请在系统设置中开启');
-      _speechEnabled = false;
-      setState(() {});
-      return;
-    }
-    
     try {
-      // Get available locales and prefer Chinese
-      final locales = await _speech.locales();
-      print('Available locales: $locales');
-      
-      // Try to find Chinese locale
-      String? chineseLocaleId;
-      for (final locale in locales) {
-        // LocaleName doesn't have languageCode, check if name contains 'zh'
-        final localeName = locale.toString();
-        if (localeName.toLowerCase().contains('zh')) {
-          chineseLocaleId = localeName;
-          print('Found Chinese locale: $chineseLocaleId');
-          break;
-        }
-      }
-      
       _speechEnabled = await _speech.initialize(
         onError: (error) => print('Speech error: $error'),
         onStatus: (status) => print('Speech status: $status'),
