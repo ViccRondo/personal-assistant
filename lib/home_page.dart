@@ -76,11 +76,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       final locales = await _speech.locales();
       print('Available locales: $locales');
       
-      // Find Chinese locale
+      // Try to find Chinese locale
       String? chineseLocaleId;
       for (final locale in locales) {
-        if (locale.languageCode == 'zh') {
-          chineseLocaleId = locale.localeId;
+        // LocaleName doesn't have languageCode, check if name contains 'zh'
+        final localeName = locale.toString();
+        if (localeName.toLowerCase().contains('zh')) {
+          chineseLocaleId = localeName;
           print('Found Chinese locale: $chineseLocaleId');
           break;
         }
