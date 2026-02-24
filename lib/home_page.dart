@@ -72,6 +72,20 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
     
     try {
+      // Get available locales and prefer Chinese
+      final locales = await _speech.locales();
+      print('Available locales: $locales');
+      
+      // Find Chinese locale
+      String? chineseLocaleId;
+      for (final locale in locales) {
+        if (locale.languageCode == 'zh') {
+          chineseLocaleId = locale.localeId;
+          print('Found Chinese locale: $chineseLocaleId');
+          break;
+        }
+      }
+      
       _speechEnabled = await _speech.initialize(
         onError: (error) => print('Speech error: $error'),
         onStatus: (status) => print('Speech status: $status'),
@@ -148,6 +162,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       listenFor: const Duration(seconds: 30),
       pauseFor: const Duration(seconds: 3),
       localeId: 'zh_CN',
+      listenMode: stt.ListenMode.confirmation,
     );
   }
   
