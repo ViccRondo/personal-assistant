@@ -3,6 +3,8 @@ name: Build and Release APK
 on:
   push:
     branches: [main]
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 jobs:
@@ -19,64 +21,42 @@ jobs:
           flutter-version: '3.22.0'
           channel: 'stable'
           
-      - name: Show Flutter version
-        run: flutter --version
-        
       - name: Get dependencies
         run: flutter pub get
         
-      - name: List files
-        run: ls -la
-        
-      - name: Check Android setup
-        run: |
-          flutter doctor -v
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-        
       - name: Create local.properties
-        run: |
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-          cat local.properties
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
         
       - name: Build APK (Debug)
-        run: |
-          flutter build apk --debug 2>&1 | tee build.log
-        
-      - name: Show build output
-        if: always()
-        run: cat build.log
-        
-      - name: Check APK output
-        run: ls -la build/app/outputs/flutter-apk/ || echo "No APK found"
-        
-      - name: Upload Debug APK as Artifact
-        uses: actions/upload-artifact@v4
-        if: success()
-        with:
-          name: debug-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
+        run: flutter build apk --debug
         
       - name: Build APK (Release)
-        if: success()
-        run: |
-          flutter build apk --release 2>&1 | tee release-build.log
+        run: flutter build apk --release
         
-      - name: Upload Release APK as Artifact
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
-        if: success()
         with:
-          name: release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
-        
+          name: apks
+          path: |
+            build/app/outputs/flutter-apk/app-debug.apk
+            build/app/outputs/flutter-apk/app-release.apk
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+      - name: Download APKs
+        uses: actions/download-artifact@v4
+        with:
+          name: apks
+          
       - name: Create Release
         uses: softprops/action-gh-release@v1
-        if: success()
         with:
           files: |
-            build/app/outputs/flutter-apk/app-release.apk
-            build/app/outputs/flutter-apk/app-debug.apk
-          draft: false
-          prerelease: false
+            app-release.apk
+            app-debug.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
