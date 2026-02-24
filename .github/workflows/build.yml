@@ -19,8 +19,14 @@ jobs:
           flutter-version: '3.24.0'
           channel: 'stable'
           
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v2
+        
       - name: Get dependencies
         run: flutter pub get
+        
+      - name: Create local.properties
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
         
       - name: Build APK (Debug)
         run: flutter build apk --debug
